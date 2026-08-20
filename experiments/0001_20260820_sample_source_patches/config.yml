@@ -1,0 +1,20 @@
+# ============================================================
+# Experiment Configuration
+# ============================================================
+# - Fixed hyperparameters go here.
+# - Variable dimensions (model, seed, prompt, ...) go in run_slurm.sh GRID_ARGS.
+# - Do NOT hardcode values you intend to sweep.
+# ============================================================
+
+# --- Hyperparameters ---
+seed: 42
+
+# Pilot scale: 100 WSIs x 20 patches = 2,000 patches. Raise once the
+# pipeline (0001-0004) has been validated end to end.
+n_wsi: 100
+patches_per_wsi: 20
+
+patch_size_px: 256
+mpp_target: 0.5          # ~20x, confirmed against real TG-GATEs data (see docs/task_a_implementation_plan.md)
+tissue_threshold: 0.8    # min tissue occupancy (Otsu mask) required to accept a patch
+thumb_size: 1024         # thumbnail long side used for Otsu tissue segmentation
