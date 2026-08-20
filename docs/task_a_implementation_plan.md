@@ -301,3 +301,18 @@ Slurmでのフルスケール投入に進む。
 - [ ] 摂動の強度パラメータ具体値（上表は初期案。実際のH&E画像で視覚的に妥当か確認が必要）
 - [ ] `downsample_mpp`摂動を「縮小して同サイズに再拡大」とするか「実際に小さいテンソルのままモデルに渡す」とするか
       （後者の方が実運用のMPP不整合に近いが、モデルによって入力サイズ固定の制約がある点に注意）
+
+## 9. 実行メモ（0001-0003投入時に判明したインフラの癖）
+
+- `make preflight`の`config.get()`/`config[...]`検出用正規表現が閉じ括弧不足で常にクラッシュする
+  バグを発見・修正（`scripts/preflight_check.py`、テンプレート由来）。
+- `--gres=gpu:1`を要求するジョブは、`--partition`に何を指定してもスケジューラ側で
+  `x-large-{owner}`扱いになり、**`--time`を240分以上にしないと投入自体が拒否される**
+  （`sbatch: error: x-large-andre01 requires >= 240 minutes`）。GPU不要なCPUジョブは
+  通常通り`--time`に応じて`small/medium/large-{owner}`が選べる。次にGPUジョブを作るときは
+  最初から`--partition=x-large-{owner}` `--time=04:00:00`（以上）にしておくと手戻りがない。
+- TRIDENTのpatch encoderは`encoder_factory(model_name)`が返す`model`/`eval_transforms`/`precision`を
+  そのまま使う。**モデル自体を`precision`にキャストしてはいけない**（fp32のsubmoduleを持つ
+  エンコーダで型不一致エラーになる）。TRIDENT公式の推論コード（`trident/wsi_objects/WSI.py`）と
+  同様、モデル・入力ともfp32のままにし、`torch.autocast(dtype=precision, enabled=(precision!=torch.float32))`
+  で推論だけラップするのが正しい使い方。
