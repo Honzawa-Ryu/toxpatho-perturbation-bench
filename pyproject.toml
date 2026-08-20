@@ -53,6 +53,12 @@ dependencies = [
     "sentencepiece",
     "vllm>=0.22.0",
     "matplotlib-venn>=1.1.2",
+
+    # --- Pathology (toxpatho-perturbation-bench: Task A) ---
+    "tiffslide",
+    "timm>=0.9.16,<2",
+    "einops-exts",
+    "trident[patch-encoders]",
 ]
 
 
@@ -75,3 +81,4 @@ explicit = true
 torch = { index = "pytorch-cu130" }
 torchvision = { index = "pytorch-cu130" }
 torchaudio = { index = "pytorch-cu130" }
+trident = { git = "https://github.com/mahmoodlab/TRIDENT.git" }
