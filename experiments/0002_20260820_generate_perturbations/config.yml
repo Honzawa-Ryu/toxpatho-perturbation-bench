@@ -1,0 +1,17 @@
+# ============================================================
+# Experiment Configuration
+# ============================================================
+# - Fixed hyperparameters go here.
+# - Variable dimensions (model, seed, prompt, ...) go in run_slurm.sh GRID_ARGS.
+# - Do NOT hardcode values you intend to sweep.
+# ============================================================
+
+# --- Hyperparameters ---
+seed: 42
+
+# Upstream: read the original patches sampled in Exp 0001.
+source_exp: "0001_20260820_sample_source_patches"
+source_variant: "256px_mpp0.5"
+
+# Perturbation kinds/levels/params themselves live in lib/perturbations.py
+# (PERTURBATION_LEVELS) -- single source of truth, not duplicated here.
