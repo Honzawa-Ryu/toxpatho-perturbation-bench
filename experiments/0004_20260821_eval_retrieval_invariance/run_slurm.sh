@@ -1,14 +1,14 @@
 #!/bin/bash
-#SBATCH --job-name=0002_20260820_generate_perturbations
+#SBATCH --job-name=0004_20260821_eval_retrieval_invariance
 #SBATCH --partition=small-andre01
-#SBATCH --output=/workspace/andre01/honzawa/02-playground/toxpatho-perturbation-bench/logs/0002_20260820_generate_perturbations/%j_0002_20260820_generate_perturbations.out
-#SBATCH --error=/workspace/andre01/honzawa/02-playground/toxpatho-perturbation-bench/logs/0002_20260820_generate_perturbations/%j_0002_20260820_generate_perturbations.out
+#SBATCH --output=/workspace/andre01/honzawa/02-playground/toxpatho-perturbation-bench/logs/0004_20260821_eval_retrieval_invariance/%j_0004_20260821_eval_retrieval_invariance.out
+#SBATCH --error=/workspace/andre01/honzawa/02-playground/toxpatho-perturbation-bench/logs/0004_20260821_eval_retrieval_invariance/%j_0004_20260821_eval_retrieval_invariance.out
 #SBATCH --signal=B:USR1@30
 #SBATCH --export=ALL
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16g
-#SBATCH --time=00:30:00
+#SBATCH --time=00:15:00
 
 # 他の実験のジョブに依存させたい場合、有効化してjob_idを埋める
 # （job_idは outputs/{依存先exp}/latest_job_id.txt を参照。投入のたびに
@@ -17,8 +17,8 @@
 
 # Array run にする場合、上の3行の --output/--error/この直後の --array を
 # 以下の2行に置き換える（%j→%A_%a、--array=0-N を追加。Nの決め方は下記参照）:
-# #SBATCH --output=/workspace/andre01/honzawa/02-playground/toxpatho-perturbation-bench/logs/0002_20260820_generate_perturbations/%A_%a_0002_20260820_generate_perturbations.out
-# #SBATCH --error=/workspace/andre01/honzawa/02-playground/toxpatho-perturbation-bench/logs/0002_20260820_generate_perturbations/%A_%a_0002_20260820_generate_perturbations.out
+# #SBATCH --output=/workspace/andre01/honzawa/02-playground/toxpatho-perturbation-bench/logs/0004_20260821_eval_retrieval_invariance/%A_%a_0004_20260821_eval_retrieval_invariance.out
+# #SBATCH --error=/workspace/andre01/honzawa/02-playground/toxpatho-perturbation-bench/logs/0004_20260821_eval_retrieval_invariance/%A_%a_0004_20260821_eval_retrieval_invariance.out
 # #SBATCH --array=0-N
 #
 # ⚠️ 注意: リソース(--gres/--cpus-per-task/--mem/--time)を変更したら、
@@ -28,7 +28,12 @@
 #          下記の Array run / Seq run の使用を推奨。
 
 export PROJECT_ROOT="/workspace/andre01/honzawa/02-playground/toxpatho-perturbation-bench"
-export EXP_NAME="0002_20260820_generate_perturbations"
+export EXP_NAME="0004_20260821_eval_retrieval_invariance"
+
+# Apptainer image used by scripts/slurm_entry.sh (--nv + .venv activate inside
+# the container). Hardcoded here (rather than relying on the submitting
+# shell's env) so a job never silently falls back to running on the bare host
+# just because SIF_PATH wasn't exported at submission time.
 export SIF_PATH="${PROJECT_ROOT}/env.sif"
 
 # =====================================================
@@ -38,8 +43,8 @@ export SIF_PATH="${PROJECT_ROOT}/env.sif"
 # （例: 出力を実行中にリアルタイムで/workspace側から監視したい等）。
 # =====================================================
 
-# This experiment reads from outputs/0001_.../ (not data/), so staging
-# data/ (644GB) to scratch would be pure waste -- same reasoning as Exp 0001.
+# This experiment reads from outputs/0003_.../ (not data/), so staging
+# data/ (644GB) to scratch would be pure waste.
 USE_LOCAL_SSD_INPUT=0
 USE_LOCAL_SSD_OUTPUT=1
 

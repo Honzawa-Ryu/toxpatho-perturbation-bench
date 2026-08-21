@@ -31,6 +31,12 @@
 export PROJECT_ROOT="__PROJECT_ROOT__"
 export EXP_NAME="__EXP_NAME__"
 
+# Apptainer image used by scripts/slurm_entry.sh (--nv + .venv activate inside
+# the container). Hardcoded here (rather than relying on the submitting
+# shell's env) so a job never silently falls back to running on the bare host
+# just because SIF_PATH wasn't exported at submission time.
+export SIF_PATH="${PROJECT_ROOT}/env.sif"
+
 # =====================================================
 # Storage
 # /workspace はNFS（遅い）、/scratch はノード付属のm.2 SSD（速い・ジョブ終了時に

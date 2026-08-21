@@ -29,6 +29,7 @@
 
 export PROJECT_ROOT="/workspace/andre01/honzawa/02-playground/toxpatho-perturbation-bench"
 export EXP_NAME="0001_20260820_sample_source_patches"
+export SIF_PATH="${PROJECT_ROOT}/env.sif"
 
 # =====================================================
 # Storage

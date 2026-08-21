@@ -1,16 +1,16 @@
 #!/bin/bash
 #SBATCH --job-name=0003_20260820_extract_patch_embeddings
-#SBATCH --partition=large-andre01
+#SBATCH --partition=x-large-andre01
 #SBATCH --output=/workspace/andre01/honzawa/02-playground/toxpatho-perturbation-bench/logs/0003_20260820_extract_patch_embeddings/%A_%a_0003_20260820_extract_patch_embeddings.out
 #SBATCH --error=/workspace/andre01/honzawa/02-playground/toxpatho-perturbation-bench/logs/0003_20260820_extract_patch_embeddings/%A_%a_0003_20260820_extract_patch_embeddings.out
 #SBATCH --array=0-29
-#SBATCH --signal=B:USR1@108
+#SBATCH --signal=B:USR1@144
 #SBATCH --export=ALL
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32g
-#SBATCH --time=03:00:00
+#SBATCH --time=04:00:00
 
 # 他の実験のジョブに依存させたい場合、有効化してjob_idを埋める
 # （job_idは outputs/{依存先exp}/latest_job_id.txt を参照。投入のたびに
@@ -23,6 +23,7 @@
 
 export PROJECT_ROOT="/workspace/andre01/honzawa/02-playground/toxpatho-perturbation-bench"
 export EXP_NAME="0003_20260820_extract_patch_embeddings"
+export SIF_PATH="${PROJECT_ROOT}/env.sif"
 
 # =====================================================
 # Storage

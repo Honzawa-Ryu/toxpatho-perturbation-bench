@@ -1,0 +1,16 @@
+# ============================================================
+# Experiment Configuration
+# ============================================================
+# - Fixed hyperparameters go here.
+# - Variable dimensions (model, seed, prompt, ...) go in run_slurm.sh GRID_ARGS.
+# - Do NOT hardcode values you intend to sweep.
+# ============================================================
+
+# --- Hyperparameters ---
+seed: 42
+
+# Upstream: per-model embeddings from Exp 0003. Models are auto-discovered
+# from outputs/{embed_exp}/*/completion.json (status == "completed"), so a
+# newly-added model (e.g. after requesting HF access) is picked up on rerun
+# without editing this file.
+embed_exp: "0003_20260820_extract_patch_embeddings"
