@@ -151,7 +151,14 @@ def plot_heatmap(metrics: pd.DataFrame, level: int, out_path: Path) -> None:
     plt.close(fig)
 
 
-def plot_degradation_curves(metrics: pd.DataFrame, out_path: Path) -> None:
+def plot_degradation_curves(metrics: pd.DataFrame, out_path: Path, log_scale: bool = False) -> None:
+    """Per-kind top1_acc vs. level, one line per model.
+
+    log_scale=True puts the y-axis on a log scale, which spreads out models
+    that are bunched up near the 1.0 ceiling (e.g. stain_jitter, where every
+    model stays >=0.84 and the linear plot looks flat) at the cost of
+    compressing the near-zero (fully collapsed) end.
+    """
     kinds = sorted(k for k in metrics["kind"].unique() if k != "ALL")
     models = sorted(metrics["model"].unique())
     fig, axes = plt.subplots(2, 4, figsize=(20, 8), sharey=True)
@@ -161,9 +168,13 @@ def plot_degradation_curves(metrics: pd.DataFrame, out_path: Path) -> None:
             ax.plot(sub["level"], sub["top1_acc"], marker="o", markersize=3, linewidth=1, label=model)
         ax.set_title(kind, fontsize=9)
         ax.set_xticks([1, 2, 3])
-        ax.set_ylim(0, 1.05)
-    axes[0, 0].set_ylabel("top1_acc")
-    axes[1, 0].set_ylabel("top1_acc")
+        if log_scale:
+            ax.set_yscale("log")
+            ax.set_ylim(1e-3, 1.3)
+        else:
+            ax.set_ylim(0, 1.05)
+    axes[0, 0].set_ylabel("top1_acc" + (" (log)" if log_scale else ""))
+    axes[1, 0].set_ylabel("top1_acc" + (" (log)" if log_scale else ""))
     handles, labels = axes[0, 0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 1.08), ncol=7, fontsize=7)
     fig.tight_layout()
@@ -214,6 +225,7 @@ def main() -> None:
     figures_dir.mkdir(parents=True, exist_ok=True)
     plot_heatmap(metrics, level=3, out_path=figures_dir / "heatmap_top1_level3.png")
     plot_degradation_curves(metrics, out_path=figures_dir / "degradation_curves.png")
+    plot_degradation_curves(metrics, out_path=figures_dir / "degradation_curves_log.png", log_scale=True)
     logger.info(f"Wrote figures -> {figures_dir}")
 
     overall = metrics[metrics["kind"] == "ALL"][["model", "top1_acc", "top5_acc", "mrr"]]
