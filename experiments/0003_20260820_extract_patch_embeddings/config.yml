@@ -11,8 +11,8 @@ seed: 42
 
 # Upstream: original patches (Exp 0001) + perturbed patches (Exp 0002).
 source_exp: "0001_20260820_sample_source_patches"
-source_variant: "256px_mpp0.5"
+source_variant: "256px_mpp0.5_n1000x20"
 perturb_exp: "0002_20260820_generate_perturbations"
-perturb_variant: "default"
+perturb_variant: "256px_mpp0.5_n1000x20"
 
 batch_size: 128

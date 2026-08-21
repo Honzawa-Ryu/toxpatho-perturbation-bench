@@ -66,7 +66,7 @@ def main() -> None:
     source_exp: str = config["source_exp"]
     source_variant: str = config["source_variant"]
 
-    variant_key = "default"
+    variant_key = source_variant
     run_dir = get_run_dir(project_root, __file__, variant_key, output_root=output_root)
     logger = setup_logger(run_dir, exp_name)
 

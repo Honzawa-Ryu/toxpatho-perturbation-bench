@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 import torch
 import yaml
 from PIL import Image
@@ -138,43 +140,65 @@ def main() -> None:
     logger.info(f"Loaded encoder '{model_name}' (precision={precision})")
 
     manifest_path = run_dir / "embeddings.parquet"
-    out_rows: list[dict] = []
 
-    for i in range(0, len(records), batch_size):
-        batch = records[i : i + batch_size]
-        imgs = [transform(Image.open(r["image_path"]).convert("RGB")) for r in batch]
-        x = torch.stack(imgs).to(device)
+    # Stream each batch straight to disk as its own row group instead of
+    # accumulating every row in a Python list first: at full scale (500k
+    # rows/model) a list of dicts holding per-row float lists costs tens of
+    # GB of Python-object overhead alone. Explicit float32 for the embedding
+    # column also roughly halves file size vs. the float64 pandas would infer
+    # from a plain list of Python floats.
+    schema = pa.schema(
+        [
+            ("embedding_id", pa.string()),
+            ("parent_patch_id", pa.string()),
+            ("source_type", pa.string()),
+            ("kind", pa.string()),
+            ("level", pa.int64()),
+            ("embedding", pa.list_(pa.float32())),
+        ]
+    )
+    writer = pq.ParquetWriter(manifest_path, schema)
+    n_written = 0
+    last_dim = None
 
-        # Mirrors TRIDENT's own inference pattern (trident/wsi_objects/WSI.py):
-        # keep model/input weights in fp32 and let autocast handle mixed
-        # precision -- casting the model itself to `precision` breaks encoders
-        # whose submodules expect fp32 (e.g. some norm layers).
-        with torch.no_grad(), torch.autocast(
-            device_type=device.type, dtype=precision, enabled=(precision != torch.float32)
-        ):
-            z = encoder(x)
-        z = z.detach().float().cpu().numpy()
+    try:
+        for i in range(0, len(records), batch_size):
+            batch = records[i : i + batch_size]
+            imgs = [transform(Image.open(r["image_path"]).convert("RGB")) for r in batch]
+            x = torch.stack(imgs).to(device)
 
-        for r, emb in zip(batch, z):
-            out_rows.append(
+            # Mirrors TRIDENT's own inference pattern (trident/wsi_objects/WSI.py):
+            # keep model/input weights in fp32 and let autocast handle mixed
+            # precision -- casting the model itself to `precision` breaks encoders
+            # whose submodules expect fp32 (e.g. some norm layers).
+            with torch.no_grad(), torch.autocast(
+                device_type=device.type, dtype=precision, enabled=(precision != torch.float32)
+            ):
+                z = encoder(x)
+            z = z.detach().float().cpu().numpy().astype("float32")
+            last_dim = z.shape[1]
+
+            table = pa.table(
                 {
-                    "embedding_id": r["embedding_id"],
-                    "parent_patch_id": r["parent_patch_id"],
-                    "source_type": r["source_type"],
-                    "kind": r["kind"],
-                    "level": r["level"],
-                    "embedding": emb.tolist(),
-                }
+                    "embedding_id": [r["embedding_id"] for r in batch],
+                    "parent_patch_id": [r["parent_patch_id"] for r in batch],
+                    "source_type": [r["source_type"] for r in batch],
+                    "kind": [r["kind"] for r in batch],
+                    "level": [r["level"] for r in batch],
+                    "embedding": [emb.tolist() for emb in z],
+                },
+                schema=schema,
             )
+            writer.write_table(table)
+            n_written += len(batch)
 
-        done = i + len(batch)
-        if done % (batch_size * 20) == 0 or done == len(records):
-            logger.info(f"[{done}/{len(records)}] encoded")
-            pd.DataFrame(out_rows).to_parquet(manifest_path, index=False)
+            done = i + len(batch)
+            if done % (batch_size * 20) == 0 or done == len(records):
+                logger.info(f"[{done}/{len(records)}] encoded")
+    finally:
+        writer.close()
 
-    df = pd.DataFrame(out_rows)
-    df.to_parquet(manifest_path, index=False)
-    logger.info(f"Done: {len(df)} embeddings (dim={len(df['embedding'].iloc[0])}) -> {manifest_path}")
+    logger.info(f"Done: {n_written} embeddings (dim={last_dim}) -> {manifest_path}")
 
     complete_run(run_dir)
     logger.info("Done.")

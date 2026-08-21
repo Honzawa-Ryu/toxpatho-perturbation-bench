@@ -4,13 +4,17 @@
 #SBATCH --output=/workspace/andre01/honzawa/02-playground/toxpatho-perturbation-bench/logs/0003_20260820_extract_patch_embeddings/%A_%a_0003_20260820_extract_patch_embeddings.out
 #SBATCH --error=/workspace/andre01/honzawa/02-playground/toxpatho-perturbation-bench/logs/0003_20260820_extract_patch_embeddings/%A_%a_0003_20260820_extract_patch_embeddings.out
 #SBATCH --array=0-29
-#SBATCH --signal=B:USR1@144
+#SBATCH --signal=B:USR1@864
 #SBATCH --export=ALL
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32g
-#SBATCH --time=04:00:00
+#SBATCH --time=24:00:00
+# Full scale: 500,000 images/model (20,000 originals + 480,000 perturbed) --
+# pilot's slowest models (uni_v1/uni_v2/ctranspath/phikon, ~65min for 50k
+# images) project to ~11h at 10x. 24h leaves ~2x margin; partition MaxTime
+# is unlimited so this can be raised further if a model still times out.
 
 # 他の実験のジョブに依存させたい場合、有効化してjob_idを埋める
 # （job_idは outputs/{依存先exp}/latest_job_id.txt を参照。投入のたびに

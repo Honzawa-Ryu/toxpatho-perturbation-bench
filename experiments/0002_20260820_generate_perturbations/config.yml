@@ -11,7 +11,7 @@ seed: 42
 
 # Upstream: read the original patches sampled in Exp 0001.
 source_exp: "0001_20260820_sample_source_patches"
-source_variant: "256px_mpp0.5"
+source_variant: "256px_mpp0.5_n1000x20"
 
 # Perturbation kinds/levels/params themselves live in lib/perturbations.py
 # (PERTURBATION_LEVELS) -- single source of truth, not duplicated here.

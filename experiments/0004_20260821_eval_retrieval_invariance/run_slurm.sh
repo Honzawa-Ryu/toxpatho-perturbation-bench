@@ -1,14 +1,17 @@
 #!/bin/bash
 #SBATCH --job-name=0004_20260821_eval_retrieval_invariance
-#SBATCH --partition=small-andre01
+#SBATCH --partition=medium-andre01
 #SBATCH --output=/workspace/andre01/honzawa/02-playground/toxpatho-perturbation-bench/logs/0004_20260821_eval_retrieval_invariance/%j_0004_20260821_eval_retrieval_invariance.out
 #SBATCH --error=/workspace/andre01/honzawa/02-playground/toxpatho-perturbation-bench/logs/0004_20260821_eval_retrieval_invariance/%j_0004_20260821_eval_retrieval_invariance.out
-#SBATCH --signal=B:USR1@30
+#SBATCH --signal=B:USR1@72
 #SBATCH --export=ALL
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=16g
-#SBATCH --time=00:15:00
+#SBATCH --mem=32g
+#SBATCH --time=02:00:00
+# Full scale: ~10x rows/model (500k vs 50k). Similarity matmul is now
+# query-batched (see eval_model) so it stays fast; the larger parquet reads
+# dominate. Pilot was 54s total for 19 models; budgeted with wide margin.
 
 # 他の実験のジョブに依存させたい場合、有効化してjob_idを埋める
 # （job_idは outputs/{依存先exp}/latest_job_id.txt を参照。投入のたびに

@@ -1,14 +1,16 @@
 #!/bin/bash
 #SBATCH --job-name=0002_20260820_generate_perturbations
-#SBATCH --partition=small-andre01
+#SBATCH --partition=x-large-andre01
 #SBATCH --output=/workspace/andre01/honzawa/02-playground/toxpatho-perturbation-bench/logs/0002_20260820_generate_perturbations/%j_0002_20260820_generate_perturbations.out
 #SBATCH --error=/workspace/andre01/honzawa/02-playground/toxpatho-perturbation-bench/logs/0002_20260820_generate_perturbations/%j_0002_20260820_generate_perturbations.out
-#SBATCH --signal=B:USR1@30
+#SBATCH --signal=B:USR1@216
 #SBATCH --export=ALL
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16g
-#SBATCH --time=00:30:00
+#SBATCH --time=06:00:00
+# Full scale (480,000 perturbations): pilot ran 48,000 in ~25min (I/O-bound
+# PNG writes, not CPU), so ~4.2h projected at 10x -- sized with margin.
 
 # 他の実験のジョブに依存させたい場合、有効化してjob_idを埋める
 # （job_idは outputs/{依存先exp}/latest_job_id.txt を参照。投入のたびに

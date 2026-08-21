@@ -9,9 +9,10 @@
 # --- Hyperparameters ---
 seed: 42
 
-# Pilot scale: 100 WSIs x 20 patches = 2,000 patches. Raise once the
-# pipeline (0001-0004) has been validated end to end.
-n_wsi: 100
+# Full scale: all 1,000 WSIs x 20 patches = 20,000 patches. Pipeline
+# (0001-0004) validated end to end at pilot scale (100 x 20) first --
+# see docs/task_a_implementation_plan.md.
+n_wsi: 1000
 patches_per_wsi: 20
 
 patch_size_px: 256

@@ -71,8 +71,15 @@ def discover_completed_models(embed_dir: Path) -> list[str]:
     return models
 
 
-def eval_model(model_dir: Path) -> pd.DataFrame:
-    """Return a per-perturbation (kind, level) metrics DataFrame for one model."""
+def eval_model(model_dir: Path, query_batch_size: int = 4000) -> pd.DataFrame:
+    """Return a per-perturbation (kind, level) metrics DataFrame for one model.
+
+    The (n_query x n_gallery) similarity matrix is computed in query batches
+    rather than all at once -- at pilot scale (48k x 2k) a single dense matrix
+    is fine (384MB), but at full scale (both dimensions grow together) it
+    would be tens of GB per model. Batching keeps peak memory bounded
+    regardless of dataset size, at no extra FLOPs cost.
+    """
     df = pd.read_parquet(model_dir / "embeddings.parquet")
 
     orig = df[df["source_type"] == "original"]
@@ -87,11 +94,17 @@ def eval_model(model_dir: Path) -> pd.DataFrame:
     query_emb /= np.linalg.norm(query_emb, axis=1, keepdims=True)
     true_idx = pert["parent_patch_id"].map(id_to_idx).to_numpy()
 
-    sims = query_emb @ gallery_emb.T  # (n_query, n_gallery) cosine similarity
-    true_sim = sims[np.arange(len(sims)), true_idx]
-    # Rank of the true match among the gallery (1 = nearest neighbor). Ties are
-    # broken optimistically (strict '>' only counts genuinely closer items).
-    rank = (sims > true_sim[:, None]).sum(axis=1) + 1
+    rank = np.empty(len(pert), dtype=np.int64)
+    true_sim = np.empty(len(pert), dtype=np.float32)
+    for start in range(0, len(query_emb), query_batch_size):
+        end = start + query_batch_size
+        sims = query_emb[start:end] @ gallery_emb.T  # (batch, n_gallery) cosine similarity
+        batch_true_idx = true_idx[start:end]
+        batch_true_sim = sims[np.arange(len(sims)), batch_true_idx]
+        # Rank of the true match among the gallery (1 = nearest neighbor). Ties
+        # are broken optimistically (strict '>' only counts genuinely closer items).
+        rank[start:end] = (sims > batch_true_sim[:, None]).sum(axis=1) + 1
+        true_sim[start:end] = batch_true_sim
 
     result = pert[["kind", "level"]].copy()
     result["rank"] = rank

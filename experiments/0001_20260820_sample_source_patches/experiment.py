@@ -77,7 +77,7 @@ def main() -> None:
     tissue_threshold: float = config["tissue_threshold"]
     thumb_size: int = config.get("thumb_size", 1024)
 
-    variant_key = f"{patch_size_px}px_mpp{mpp_target}"
+    variant_key = f"{patch_size_px}px_mpp{mpp_target}_n{n_wsi}x{patches_per_wsi}"
     run_dir = get_run_dir(project_root, __file__, variant_key, output_root=output_root)
     logger = setup_logger(run_dir, exp_name)
 
