@@ -11,6 +11,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 import yaml
 
 
@@ -88,17 +89,38 @@ def eval_model(model_dir: Path, query_batch_size: int = 4000) -> pd.DataFrame:
     would be tens of GB per model. Batching keeps peak memory bounded
     regardless of dataset size, at no extra FLOPs cost.
     """
-    df = pd.read_parquet(model_dir / "embeddings.parquet")
+    # Read via pyarrow and reshape the embedding column's flat float buffer
+    # directly, instead of pd.read_parquet(): pandas materializes a list<float>
+    # column as one Python list object per row, which is several times the raw
+    # data size in memory. That was fine at pilot scale but OOM'd at full scale
+    # on the largest-embedding-dim model (genbio-pathfm, ~5800-d, 11.7GB file)
+    # even with 32GB requested.
+    table = pq.read_table(model_dir / "embeddings.parquet")
+    n_rows = table.num_rows
+    embedding_col = table.column("embedding")
+    # combine_chunks()/concat over the whole column can overflow pyarrow's
+    # 32-bit list offsets once n_rows * dim gets large enough (hit this on
+    # genbio-pathfm: ~500k rows x ~5800-d = ~2.9B float elements, past the
+    # ~2.1B int32 limit). Each chunk individually (one Exp 0003 write batch,
+    # a few hundred rows) is always well within range, so fill a
+    # preallocated array chunk by chunk instead of concatenating first.
+    dim = len(embedding_col.chunk(0)[0])
+    embeddings = np.empty((n_rows, dim), dtype=np.float32)
+    offset = 0
+    for chunk in embedding_col.chunks:
+        n = len(chunk)
+        embeddings[offset : offset + n] = chunk.values.to_numpy(zero_copy_only=False).reshape(n, dim)
+        offset += n
+    meta = table.select(["parent_patch_id", "source_type", "kind", "level"]).to_pandas()
 
-    orig = df[df["source_type"] == "original"]
-    pert = df[df["source_type"] == "perturbed"]
-
-    gallery_ids = orig["parent_patch_id"].to_numpy()
-    gallery_emb = np.stack(orig["embedding"].to_numpy()).astype(np.float32)
+    is_orig = (meta["source_type"] == "original").to_numpy()
+    gallery_ids = meta.loc[is_orig, "parent_patch_id"].to_numpy()
+    gallery_emb = embeddings[is_orig].copy()
     gallery_emb /= np.linalg.norm(gallery_emb, axis=1, keepdims=True)
     id_to_idx = {pid: i for i, pid in enumerate(gallery_ids)}
 
-    query_emb = np.stack(pert["embedding"].to_numpy()).astype(np.float32)
+    pert = meta.loc[~is_orig].reset_index(drop=True)
+    query_emb = embeddings[~is_orig].copy()
     query_emb /= np.linalg.norm(query_emb, axis=1, keepdims=True)
     true_idx = pert["parent_patch_id"].map(id_to_idx).to_numpy()
 

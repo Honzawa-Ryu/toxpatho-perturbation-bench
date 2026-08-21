@@ -7,11 +7,14 @@
 #SBATCH --export=ALL
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=32g
+#SBATCH --mem=96g
 #SBATCH --time=02:00:00
 # Full scale: ~10x rows/model (500k vs 50k). Similarity matmul is now
 # query-batched (see eval_model) so it stays fast; the larger parquet reads
 # dominate. Pilot was 54s total for 19 models; budgeted with wide margin.
+# mem=96g: the largest model (genbio-pathfm, ~5800-d embeddings) measured a
+# 37GB peak RSS standalone; sized with margin for the sequential 19-model
+# loop not fully releasing memory between models (32g OOM'd on this model).
 
 # 他の実験のジョブに依存させたい場合、有効化してjob_idを埋める
 # （job_idは outputs/{依存先exp}/latest_job_id.txt を参照。投入のたびに
