@@ -54,10 +54,18 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def discover_completed_models(embed_dir: Path) -> list[str]:
-    models = []
+def discover_completed_models(embed_dir: Path, variant_suffix: str) -> dict[str, str]:
+    """Map clean model name -> its output directory name under embed_dir.
+
+    Exp 0003's variant_key is "{model}__{source_variant}" so pilot-scale and
+    full-scale runs of the same model don't collide (see git history for why:
+    without the suffix, a full-scale rerun silently no-ops against a pilot
+    run's "completed" marker). `variant_suffix` selects which scale to
+    evaluate here, e.g. "__256px_mpp0.5_n1000x20".
+    """
+    models: dict[str, str] = {}
     for d in sorted(embed_dir.iterdir()):
-        if not d.is_dir():
+        if not d.is_dir() or not d.name.endswith(variant_suffix):
             continue
         completion_path = d / "completion.json"
         if not completion_path.exists():
@@ -67,7 +75,7 @@ def discover_completed_models(embed_dir: Path) -> list[str]:
         except Exception:
             continue
         if status == "completed":
-            models.append(d.name)
+            models[d.name[: -len(variant_suffix)]] = d.name
     return models
 
 
@@ -196,23 +204,24 @@ def main() -> None:
     config = load_config(Path(__file__).parent)
     seed: int = config.get("seed", 42)
     embed_exp: str = config["embed_exp"]
+    embed_variant: str = config["embed_variant"]
 
-    variant_key = "default"
+    variant_key = embed_variant
     run_dir = get_run_dir(project_root, __file__, variant_key, output_root=output_root)
     logger = setup_logger(run_dir, exp_name)
 
     write_run_metadata(run_dir, exp_name=exp_name, variant_key=variant_key, seed=seed, embed_exp=embed_exp)
 
     embed_dir = project_root / "outputs" / embed_exp
-    models = discover_completed_models(embed_dir)
+    models = discover_completed_models(embed_dir, variant_suffix=f"__{embed_variant}")
     logger.info(f"Starting: {exp_name} / {variant_key}")
     logger.info(f"embed_dir: {embed_dir}")
-    logger.info(f"Discovered {len(models)} completed models: {models}")
+    logger.info(f"Discovered {len(models)} completed models: {sorted(models)}")
 
     all_metrics = []
-    for i, model in enumerate(models):
+    for i, (model, dir_name) in enumerate(sorted(models.items())):
         logger.info(f"[{i + 1}/{len(models)}] evaluating {model}")
-        m = eval_model(embed_dir / model)
+        m = eval_model(embed_dir / dir_name)
         m.insert(0, "model", model)
         all_metrics.append(m)
 

@@ -106,7 +106,7 @@ def main() -> None:
     perturb_variant: str = config["perturb_variant"]
     batch_size: int = config.get("batch_size", 128)
 
-    variant_key = model_name
+    variant_key = f"{model_name}__{source_variant}"
     run_dir = get_run_dir(project_root, __file__, variant_key, output_root=output_root)
     logger = setup_logger(run_dir, exp_name)
 

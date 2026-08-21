@@ -9,8 +9,11 @@
 # --- Hyperparameters ---
 seed: 42
 
-# Upstream: per-model embeddings from Exp 0003. Models are auto-discovered
-# from outputs/{embed_exp}/*/completion.json (status == "completed"), so a
-# newly-added model (e.g. after requesting HF access) is picked up on rerun
-# without editing this file.
+# Upstream: per-model embeddings from Exp 0003 (variant_key there is
+# "{model}__{source_variant}", so pilot- and full-scale runs of the same
+# model don't collide). Models are auto-discovered from
+# outputs/{embed_exp}/*__{embed_variant}/completion.json
+# (status == "completed"), so a newly-added model (e.g. after requesting
+# HF access) is picked up on rerun without editing this file.
 embed_exp: "0003_20260820_extract_patch_embeddings"
+embed_variant: "256px_mpp0.5_n1000x20"
