@@ -1,0 +1,24 @@
+# ============================================================
+# Experiment Configuration
+# ============================================================
+# - Fixed hyperparameters go here.
+# - Variable dimensions (model, seed, prompt, ...) go in run_slurm.sh GRID_ARGS.
+# - Do NOT hardcode values you intend to sweep.
+# ============================================================
+
+# --- Hyperparameters ---
+seed: 42
+
+# Upstream: original patches (Exp 0001) + perturbed patches (Exp 0002).
+source_exp: "0001_20260820_sample_source_patches"
+source_variant: "256px_mpp0.5_n1000x20"
+perturb_exp: "0002_20260820_generate_perturbations"
+perturb_variant: "256px_mpp0.5_n1000x20"
+
+# Reference patch for Macenko normalization: every image (original and
+# perturbed alike) is re-rendered using this patch's estimated stain
+# vectors. Picked for high tissue coverage (~99.9% non-background) and
+# moderate brightness among a 200-patch sample -- see chat for the
+# selection script. Change this and every downstream embedding needs
+# re-extracting, so don't tweak casually once Exp0003 has run against it.
+reference_patch_id: "47476_36608_18688"
