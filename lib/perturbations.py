@@ -16,7 +16,7 @@ from skimage.color import hed2rgb, rgb2hed
 PERTURBATION_LEVELS: dict[str, dict[int, float]] = {
     "rotation": {1: 15, 2: 45, 3: 90},          # degrees
     "color_jitter": {1: 0.1, 2: 0.25, 3: 0.4},   # brightness/contrast/saturation factor
-    "stain_jitter": {1: 0.02, 2: 0.05, 3: 0.1},  # HED-space alpha/beta magnitude
+    "stain_jitter": {1: 0.1, 2: 0.3, 3: 0.5},  # HED-space alpha/beta magnitude
     "jpeg_compression": {1: 90, 2: 50, 3: 20},   # JPEG quality (lower = more compressed)
     "gaussian_blur": {1: 0.5, 2: 1.5, 3: 3.0},   # sigma in px
     "gaussian_noise": {1: 5, 2: 15, 3: 30},      # std, 0-255 scale
