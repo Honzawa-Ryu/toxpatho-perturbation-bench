@@ -4,6 +4,10 @@ import os
 import sys
 from pathlib import Path
 
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
@@ -188,6 +192,107 @@ def normalization_axis_metrics(
     return {"kind": "ALL", "level": None, **summary}
 
 
+def plot_normalization_summary(norm_metrics: pd.DataFrame, out_path: Path) -> None:
+    """Per-model base-vs-norm agreement on unperturbed patches: cos_sim_mean
+    (pairwise) vs. cka_linear (set-level geometry), sorted by cka_linear.
+
+    A model where these two disagree (cos_sim near 1 but cka much lower)
+    has embeddings that individually barely move yet whose overall geometry
+    does -- see plot_normalization_scatter for the same signal isolated.
+    """
+    df = norm_metrics.sort_values("cka_linear")
+    y = range(len(df))
+    fig, ax = plt.subplots(figsize=(7, 0.32 * len(df) + 1.5))
+    ax.hlines(y, df["cos_sim_mean"], df["cka_linear"], color="lightgray", linewidth=1, zorder=1)
+    ax.scatter(df["cos_sim_mean"], y, color="tab:blue", label="cos_sim_mean (pairwise)", zorder=2, s=28)
+    ax.scatter(df["cka_linear"], y, color="tab:red", label="cka_linear (set-level)", zorder=2, s=28)
+    ax.set_yticks(list(y))
+    ax.set_yticklabels(df["model"], fontsize=8)
+    ax.set_xlim(0, 1.02)
+    ax.set_xlabel("similarity (1 = unchanged by normalization)")
+    ax.set_title("Normalization axis: base vs. stain-normalized, original patches only")
+    ax.legend(loc="lower right", fontsize=8)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+
+
+def plot_normalization_scatter(norm_metrics: pd.DataFrame, out_path: Path, annotate: list[str] | None = None) -> None:
+    """cos_sim_mean vs. cka_linear per model. A point off the diagonal (high
+    cos_sim, lower cka) usually means the representation has collapsed onto
+    very few effective dimensions (cross-check against eff_rank_ratio),
+    which makes the set-level geometry (cka) far more sensitive to a small
+    shift than any individual pairwise distance (cos_sim) shows.
+    """
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.plot([0, 1], [0, 1], color="lightgray", linestyle="--", linewidth=1, zorder=1)
+    ax.scatter(norm_metrics["cos_sim_mean"], norm_metrics["cka_linear"], color="tab:blue", s=40, zorder=2)
+    for model in annotate or []:
+        row = norm_metrics[norm_metrics["model"] == model].iloc[0]
+        ax.annotate(
+            model, (row["cos_sim_mean"], row["cka_linear"]), fontsize=8,
+            xytext=(5, 5), textcoords="offset points",
+        )
+    ax.set_xlim(0, 1.02)
+    ax.set_ylim(0, 1.02)
+    ax.set_xlabel("cos_sim_mean (pairwise)")
+    ax.set_ylabel("cka_linear (set-level)")
+    ax.set_title("Normalization axis: pairwise vs. set-level agreement")
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+
+
+def plot_perturbation_heatmap(pert_metrics: pd.DataFrame, level: int, out_path: Path) -> None:
+    """Small multiples: {cka_linear, cos_sim_mean} x {base, norm} model x kind heatmaps at one level."""
+    metrics = ["cka_linear", "cos_sim_mean"]
+    variants = ["base", "norm"]
+    sub_all = pert_metrics[(pert_metrics["level"] == level) & (pert_metrics["kind"] != "ALL")]
+    n_kinds = sub_all["kind"].nunique()
+    n_models = sub_all["model"].nunique()
+    fig, axes = plt.subplots(2, 2, figsize=(0.5 * n_kinds * 2 + 4, 0.28 * n_models * 2 + 3))
+    for i, metric in enumerate(metrics):
+        for j, variant in enumerate(variants):
+            ax = axes[i, j]
+            sub = sub_all[sub_all["variant"] == variant]
+            pivot = sub.pivot(index="model", columns="kind", values=metric).sort_index()
+            im = ax.imshow(pivot.to_numpy(), cmap="viridis", vmin=0, vmax=1, aspect="auto")
+            ax.set_xticks(range(len(pivot.columns)))
+            ax.set_xticklabels(pivot.columns, rotation=45, ha="right", fontsize=7)
+            ax.set_yticks(range(len(pivot.index)))
+            ax.set_yticklabels(pivot.index, fontsize=7)
+            ax.set_title(f"{metric}, {variant}, level {level}", fontsize=9)
+            fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+
+
+def plot_perturbation_degradation(
+    pert_metrics: pd.DataFrame, out_path: Path, metric: str = "cka_linear", variant: str = "base"
+) -> None:
+    """Per-kind `metric` vs. level, one line per model, for a single variant."""
+    sub_v = pert_metrics[(pert_metrics["variant"] == variant) & (pert_metrics["kind"] != "ALL")]
+    kinds = sorted(sub_v["kind"].unique())
+    models = sorted(sub_v["model"].unique())
+    fig, axes = plt.subplots(2, 4, figsize=(20, 8), sharey=True)
+    for ax, kind in zip(axes.flat, kinds):
+        for model in models:
+            s = sub_v[(sub_v["kind"] == kind) & (sub_v["model"] == model)].sort_values("level")
+            ax.plot(s["level"], s[metric], marker="o", markersize=3, linewidth=1, label=model)
+        ax.set_title(kind, fontsize=9)
+        ax.set_xticks([1, 2, 3])
+        ax.set_ylim(0, 1.05)
+    axes[0, 0].set_ylabel(metric)
+    axes[1, 0].set_ylabel(metric)
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 1.08), ncol=7, fontsize=7)
+    fig.suptitle(f"{metric} vs. perturbation level, variant={variant}", y=1.1)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
 def main() -> None:
     project_root = _get_project_root()
     sys.path.insert(0, str(project_root))
@@ -257,6 +362,21 @@ def main() -> None:
     norm_path = run_dir / "metrics_normalization_axis.parquet"
     norm_metrics.to_parquet(norm_path, index=False)
     logger.info(f"Wrote {len(norm_metrics)} rows -> {norm_path}")
+
+    figures_dir = run_dir / "figures"
+    figures_dir.mkdir(parents=True, exist_ok=True)
+    plot_normalization_summary(norm_metrics, figures_dir / "normalization_axis_summary.png")
+    gap = (norm_metrics["cos_sim_mean"] - norm_metrics["cka_linear"]).abs()
+    annotate = list(norm_metrics.loc[gap.nlargest(2).index, "model"])
+    lowest_cka_model = norm_metrics.loc[norm_metrics["cka_linear"].idxmin(), "model"]
+    if lowest_cka_model not in annotate:
+        annotate.append(lowest_cka_model)
+    plot_normalization_scatter(norm_metrics, figures_dir / "normalization_axis_scatter.png", annotate=annotate)
+    plot_perturbation_heatmap(pert_metrics, level=3, out_path=figures_dir / "perturbation_axis_heatmap_level3.png")
+    plot_perturbation_degradation(
+        pert_metrics, figures_dir / "perturbation_axis_degradation_cka_base.png", metric="cka_linear", variant="base"
+    )
+    logger.info(f"Wrote figures -> {figures_dir}")
 
     logger.info(
         "Normalization axis (base vs. norm, original patches only), sorted by cka_linear:\n"
