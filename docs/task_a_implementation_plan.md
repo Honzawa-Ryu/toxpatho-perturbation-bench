@@ -316,3 +316,115 @@ Slurmでのフルスケール投入に進む。
   エンコーダで型不一致エラーになる）。TRIDENT公式の推論コード（`trident/wsi_objects/WSI.py`）と
   同様、モデル・入力ともfp32のままにし、`torch.autocast(dtype=precision, enabled=(precision!=torch.float32))`
   で推論だけラップするのが正しい使い方。
+
+## 10. Task A 本実験で見つかったバグと知見（2026-08-29〜09-03）
+
+フルスケール実行後のレビューで見つかった問題と、そこから派生した染色正規化ablationの
+知見をまとめる。時系列が長いので、後から追う人向けに結論を先に書く。
+
+### 10-1. バグ: `stain_jitter`が実質効いていなかった
+
+`lib/perturbations.py`の`_stain_jitter`が、severity level（1/2/3）を上げてもほぼ同じ出力しか
+返さないバグがあった。原因は2つ重なっていた:
+
+1. `PERTURBATION_LEVELS["stain_jitter"]`の値（`{1:0.02, 2:0.05, 3:0.1}`）が、設計時の案
+   （`docs`内の初期案 `{1:0.1, 2:0.2, 3:0.35}`）から縮小されていた
+2. `beta`をそのパッチ自身のHED空間std（典型的に0.01〜0.02程度と極小）でスケールしていたため、
+   実効的なbetaがほぼゼロになっていた
+
+`PERTURBATION_LEVELS["stain_jitter"]`を`{1:0.1, 2:0.3, 3:0.5}`に変更（`lib/perturbations.py:19`）して
+修正。level1→level3の直接diffがmean 0.78→9.45（/255）まで改善し、Exp0004の実測でも
+stain_jitterの劣化曲線が他の摂動種と同程度に機能するようになった。Exp0002/0003/0004を
+フルスケールで再実行済み。
+
+### 10-2. バグ: `load_config`が`--config`引数を無視する（テンプレート由来、複数実験に影響）
+
+`experiments/000{2,3,4,5}_*/experiment.py`の`load_config(exp_dir)`が`exp_dir / "config.yml"`を
+決め打ちで読んでおり、`parse_args()`が定義する`--config`オプション（染色正規化ablation用に
+`config_stainnorm.yml`を使い分けるために追加した）を実際には一切参照していなかった。
+`experiments/0003.../experiment.py`と`experiments/0004.../experiment.py`は
+`load_config(exp_dir, config_name)`のシグネチャに直して修正済み。
+**`experiments/0002.../experiment.py`と`experiments/0005.../experiment.py`は同じ潜在バグを
+まだ抱えている**（現状`--config`を使い分ける必要がないため未修正のまま）。今後これらの実験で
+複数configを使い分けたくなったら、同じ修正が必要。
+
+### 10-3. 染色正規化（Macenko）ablationで判明した「WSI色調ショートカット」
+
+**目的**: `lib/stain_norm.py`にMacenko正規化を実装し、パッチ間の染色色調差を消した状態で
+Exp0003/0004を回し直すことで、「stain_jitterへの頑健性」が本物の形態学的頑健性なのか、
+染色色調に依存したショートカットなのかを切り分けた。
+
+**実装上のハマりどころ**（`lib/stain_norm.py`のMacenko実装）:
+- 角度percentileで染色ベクトルの外れ値を取る処理が、円環量（`-π`〜`π`）であることを考慮せず
+  素朴に`np.percentile`していたため、分布がたまたま`±π`の分岐点をまたぐ画像だと片方の染色濃度が
+  全画素0になる不具合があった。円環平均を求めて分岐点をずらす（`np.mod`で`(-π,π]`に折り返す）
+  形で修正。
+- 染色ベクトル方向を求める際、共分散計算用に中心化したデータをそのまま投影に使っていたが、
+  濃度solve側は生の（中心化していない）OD値を使っており、座標系の不整合で濃度が発散する
+  バグがあった。染色ベクトルの向き自体は中心化データから求めてよいが、投影には生のOD値を
+  使う必要がある。
+- 広く使われている参照実装（torchstain、`schaugf/HEnorm_python`由来）を後から比較したところ、
+  **円環量への対処は向こう側にも入っていない**（今回のバグと同じ潜在的脆弱性を抱えている）ことを
+  確認した。座標系の不整合バグは無く、H/E判定のヒューリスティック（こちらはRuifrok標準Hベクトルとの
+  内積、torchstainはRチャンネル成分の大小）が異なる程度。
+
+**結果**: 23モデル全部で正規化後にoverall top1_accが低下した（全モデルでdelta負）。
+下落幅はモデルによって大きく異なり（`ctranspath`: -0.23pt, `conch_v15`: -0.03pt）、
+正規化前後で総合順位が大きく入れ替わった（`gpfm`は1位→6位、`phikon`は2位→9位に下落する一方、
+`genbio-pathfm`は9位→1位、`lunit-vits8`は10位→2位に上昇）。
+
+`hibou_l`の`stain_jitter` level3での誤答を調べたところ、誤答時に同一WSI由来のパッチを引く率が
+正規化前9.55%→正規化後5.64%に低下（ランダムなら約0.1%）しており、**WSI固有の色調が検索の
+ショートカットとして機能していた**ことを直接裏付けた。
+
+天井効果を統制した偏相関分析（`base_overall`を共変量にした偏Spearman相関）では、
+正規化への頑健性を最も強く予測するのは`stain_jitter`頑健性（r=+0.705, p=0.0002）、
+次いで`gaussian_noise`（r=-0.557）・`jpeg_compression`（r=-0.425）で、
+`rotation`・`occlusion`のような幾何学的摂動への頑健性はほぼ無相関（r≈0）だった。
+ノイズ・圧縮・染色色調は「低レベルの画素統計への依存」という共通軸でまとまっており、
+幾何学的摂動への頑健性とは別次元らしいという解釈。
+
+分析コードは`notebooks/compare_stainnorm.py`、生成物は
+`outputs/0004_20260821_eval_retrieval_invariance/256px_mpp0.5_n1000x20_orig/figures/`
+（`stainnorm_delta_dumbbell.png`, `stainnorm_delta_heatmap_level3.png`,
+`stainnorm_ratio_heatmap_level3.png`）。
+
+### 10-4. モデルのpooling戦略の違い（CLSトークン vs CLS+mean）
+
+`virchow2`と`virchow2-cls`が別モデルとして存在するのは、`trident`側の実装で前者が
+CLSトークン＋全パッチトークン平均の連結、後者がCLSトークン単独という違いによるもの
+（`trident/patch_encoder_models/load.py`の`Virchow2InferenceEncoder`/`Virchow2ClsInferenceEncoder`）。
+正規化前後どちらの順位でも、また正規化への頑健性でも一貫して`virchow2-cls`（CLS単独）の方が
+`virchow2`（CLS+mean）より上位。CLS+meanは局所的な色・テクスチャ統計をより多く拾い込む分、
+染色条件の変化に弱くなっている可能性がある、という仮説（未検証）。
+
+他モデルの集約方法は`trident`のソースを直接確認する必要がある
+（`phikon`/`phikon_v2`/`openmidnight`はCLS単独、`uni_v1`/`uni_v2`/`gigapath`/`gigapath-flash`/
+`kaiko-*`/`hoptimus0`はtimmのデフォルト＝実質CLS単独、`resnet50`はCNNなのでglobal average
+pooling、`ctranspath`はSwinベースでCLSトークン自体を持たない設計）。`gpfm`/`genbio-pathfm`/
+`hibou_l`/`conch_v1`/`conch_v15`は独自実装のラッパー層に隠れていて未確認。
+
+「`trident`のデフォルト実装＝各モデルの推奨使用法」という前提に立って比較しており、
+これを検証せずに信頼している点は限界として残る。
+
+### 10-5. 現状のモデル比較（染色頑健性の観点での目安）
+
+- **一貫して強い**（正規化前後どちらの順位でも上位、かつ正規化への頑健性ランクも上位）:
+  `genbio-pathfm`, `lunit-vits8`
+- **バランス型**: `uni_v1`, `hoptimus0`, `gigapath`, `uni_v2`
+- **見かけ上の強さに注意**（正規化前の総合順位は上位だが、正規化への頑健性ランクは下位。
+  WSIショートカットに支えられていた疑いがある）: `gpfm`, `phikon`, `ctranspath`, `virchow2`,
+  `virchow2-cls`
+- **一貫して弱い**: `conch_v1`, `conch_v15`, `hibou_l`, `openmidnight`
+
+### 10-6. 残タスク
+
+- gated 6モデル（`virchow`(v1), `hoptimus1`, `h0-mini`, `phaet`, `mascaret`, `musk`）はHFアクセス
+  申請中・未承認。承認され次第、正規化あり・なし両方のパイプラインに追加投入する
+  （`experiments/0003.../run_slurm.sh`を`--array=<index>`で個別指定、`experiments/0004...`は
+  `sbatch --dependency=afterany:<job_id>`で連結する運用を踏襲）
+- `keep`モデルは`timm`のバージョン不整合（`RenameLayerScale.__init__() got an unexpected keyword
+  argument 'device'`）でHFアクセス権とは無関係に落ちる。別途調査が必要
+- `lib/stain_norm.py`のH/E判定ヒューリスティック（Ruifrok標準ベクトルとの内積）は妥当性を
+  厳密に検証していない。torchstainとの数値比較では平均diff 5.7/255程度のズレが残っており、
+  主にこのヒューリスティックの違いに起因すると見られる
