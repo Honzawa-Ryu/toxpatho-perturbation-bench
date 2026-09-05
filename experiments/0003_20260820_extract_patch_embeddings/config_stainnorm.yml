@@ -1,0 +1,16 @@
+# ============================================================
+# Stain-normalization ablation variant.
+# Same experiment.py as config.yml, pointed at Exp 0005's Macenko-normalized
+# originals/perturbed instead of Exp 0001/0002's raw ones. variant_key
+# becomes "{model}__256px_mpp0.5_n1000x20_orig", distinct from the
+# unnormalized run's "{model}__256px_mpp0.5_n1000x20" -- no collision.
+# ============================================================
+
+seed: 42
+
+source_exp: "0005_20260831_stain_normalize"
+source_variant: "256px_mpp0.5_n1000x20_orig"
+perturb_exp: "0005_20260831_stain_normalize"
+perturb_variant: "256px_mpp0.5_n1000x20_pert"
+
+batch_size: 128

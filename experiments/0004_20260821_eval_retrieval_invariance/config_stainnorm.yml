@@ -1,0 +1,11 @@
+# ============================================================
+# Stain-normalization ablation variant. Pairs with
+# experiments/0003_.../config_stainnorm.yml -- same embed_exp, embed_variant
+# matches that run's source_variant so auto-discovery picks up exactly the
+# models embedded from Macenko-normalized images.
+# ============================================================
+
+seed: 42
+
+embed_exp: "0003_20260820_extract_patch_embeddings"
+embed_variant: "256px_mpp0.5_n1000x20_orig"

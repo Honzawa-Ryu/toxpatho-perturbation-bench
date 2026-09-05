@@ -40,9 +40,9 @@ def setup_logger(run_dir: Path, name: str = "experiment") -> logging.Logger:
     return logger
 
 
-def load_config(exp_dir: Path) -> dict:
-    """Load config.yml from the experiment directory."""
-    config_path = exp_dir / "config.yml"
+def load_config(exp_dir: Path, config_name: str = "config.yml") -> dict:
+    """Load a config file from the experiment directory."""
+    config_path = exp_dir / config_name
     if not config_path.exists():
         return {}
     with open(config_path) as f:
@@ -165,24 +165,75 @@ def eval_model(model_dir: Path, query_batch_size: int = 4000) -> pd.DataFrame:
     return pd.concat([by_kind_level, overall_df], ignore_index=True)
 
 
-def plot_heatmap(metrics: pd.DataFrame, level: int, out_path: Path) -> None:
+def plot_heatmap(
+    metrics: pd.DataFrame, level: int, out_path: Path, metric: str = "top1_acc", metric_label: str = "Top-1"
+) -> None:
     sub = metrics[metrics["level"] == level]
-    pivot = sub.pivot(index="kind", columns="model", values="top1_acc")
+    pivot = sub.pivot(index="kind", columns="model", values=metric)
     fig, ax = plt.subplots(figsize=(0.5 * len(pivot.columns) + 3, 0.4 * len(pivot.index) + 2))
     im = ax.imshow(pivot.to_numpy(), cmap="viridis", vmin=0, vmax=1, aspect="auto")
     ax.set_xticks(range(len(pivot.columns)))
     ax.set_xticklabels(pivot.columns, rotation=90, fontsize=8)
     ax.set_yticks(range(len(pivot.index)))
     ax.set_yticklabels(pivot.index, fontsize=8)
-    ax.set_title(f"Top-1 retrieval accuracy at level {level}")
-    fig.colorbar(im, ax=ax, label="top1_acc")
+    ax.set_title(f"{metric_label} retrieval accuracy at level {level}")
+    fig.colorbar(im, ax=ax, label=metric)
     fig.tight_layout()
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
 
 
-def plot_degradation_curves(metrics: pd.DataFrame, out_path: Path, log_scale: bool = False) -> None:
-    """Per-kind top1_acc vs. level, one line per model.
+def rank_table(metrics: pd.DataFrame, level: int, metric: str = "top1_acc") -> pd.DataFrame:
+    """Model x kind rank (1=best) within each kind's column, plus a `mean` column, sorted best-first."""
+    sub = metrics[metrics["level"] == level]
+    pivot = sub.pivot(index="kind", columns="model", values=metric).T  # model=rows, kind=columns
+    rank = pivot.rank(axis=0, ascending=False)  # rank 1 = best (highest score) within each kind column
+    rank["mean"] = rank.mean(axis=1)
+    return rank.sort_values("mean")  # best average rank first
+
+
+def plot_rank_heatmap(
+    metrics: pd.DataFrame, level: int, out_path: Path, metric: str = "top1_acc", metric_label: str = "Top-1"
+) -> None:
+    """Model x kind heatmap colored by rank (1=best) within each kind, not raw score.
+
+    Raw-score heatmaps let the hardest kinds (e.g. gaussian_noise, where
+    everyone collapses toward 0) drown out real differences on easier kinds.
+    Ranking within each kind's column removes that scale mismatch, so a
+    model that's consistently near the top across kinds -- not just strong
+    on the kinds that happen to be easy overall -- reads as a clean row.
+    """
+    rank = rank_table(metrics, level, metric)
+    n_models = len(rank.index)
+    fig, ax = plt.subplots(figsize=(0.5 * len(rank.columns) + 3, 0.3 * len(rank.index) + 2))
+    values = rank.to_numpy()
+    im = ax.imshow(values, cmap="RdYlGn_r", vmin=1, vmax=n_models, aspect="auto")
+    ax.axvline(len(rank.columns) - 1.5, color="black", linewidth=1)  # separator before the mean column
+
+    # Annotate each cell with its value; flip text color near the colormap's
+    # dark extremes (best/worst) so it stays readable against the fill.
+    norm_values = (values - 1) / (n_models - 1)
+    for i in range(values.shape[0]):
+        for j in range(values.shape[1]):
+            text_color = "white" if norm_values[i, j] < 0.2 or norm_values[i, j] > 0.8 else "black"
+            ax.text(
+                j, i, f"{values[i, j]:.1f}", ha="center", va="center", color=text_color, fontsize=7
+            )
+    ax.set_xticks(range(len(rank.columns)))
+    ax.set_xticklabels(rank.columns, rotation=45, ha="right", fontsize=8)
+    ax.set_yticks(range(len(rank.index)))
+    ax.set_yticklabels(rank.index, fontsize=8)
+    ax.set_title(f"{metric_label} rank per kind at level {level} (1=best of {n_models})")
+    fig.colorbar(im, ax=ax, label="rank (1=best)")
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+
+
+def plot_degradation_curves(
+    metrics: pd.DataFrame, out_path: Path, metric: str = "top1_acc", log_scale: bool = False
+) -> None:
+    """Per-kind `metric` vs. level, one line per model.
 
     log_scale=True puts the y-axis on a log scale, which spreads out models
     that are bunched up near the 1.0 ceiling (e.g. stain_jitter, where every
@@ -195,7 +246,7 @@ def plot_degradation_curves(metrics: pd.DataFrame, out_path: Path, log_scale: bo
     for ax, kind in zip(axes.flat, kinds):
         for model in models:
             sub = metrics[(metrics["kind"] == kind) & (metrics["model"] == model)].sort_values("level")
-            ax.plot(sub["level"], sub["top1_acc"], marker="o", markersize=3, linewidth=1, label=model)
+            ax.plot(sub["level"], sub[metric], marker="o", markersize=3, linewidth=1, label=model)
         ax.set_title(kind, fontsize=9)
         ax.set_xticks([1, 2, 3])
         if log_scale:
@@ -203,8 +254,8 @@ def plot_degradation_curves(metrics: pd.DataFrame, out_path: Path, log_scale: bo
             ax.set_ylim(1e-3, 1.3)
         else:
             ax.set_ylim(0, 1.05)
-    axes[0, 0].set_ylabel("top1_acc" + (" (log)" if log_scale else ""))
-    axes[1, 0].set_ylabel("top1_acc" + (" (log)" if log_scale else ""))
+    axes[0, 0].set_ylabel(metric + (" (log)" if log_scale else ""))
+    axes[1, 0].set_ylabel(metric + (" (log)" if log_scale else ""))
     handles, labels = axes[0, 0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 1.08), ncol=7, fontsize=7)
     fig.tight_layout()
@@ -221,9 +272,9 @@ def main() -> None:
     exp_name = os.environ["EXP_NAME"]
     output_root = os.environ.get("OUTPUT_ROOT")
 
-    parse_args()
+    args = parse_args()
 
-    config = load_config(Path(__file__).parent)
+    config = load_config(Path(__file__).parent, args.config)
     seed: int = config.get("seed", 42)
     embed_exp: str = config["embed_exp"]
     embed_variant: str = config["embed_variant"]
@@ -254,14 +305,23 @@ def main() -> None:
 
     figures_dir = run_dir / "figures"
     figures_dir.mkdir(parents=True, exist_ok=True)
-    plot_heatmap(metrics, level=3, out_path=figures_dir / "heatmap_top1_level3.png")
-    plot_degradation_curves(metrics, out_path=figures_dir / "degradation_curves.png")
-    plot_degradation_curves(metrics, out_path=figures_dir / "degradation_curves_log.png", log_scale=True)
+    plot_heatmap(metrics, level=3, out_path=figures_dir / "heatmap_top1_level3.png", metric="top1_acc", metric_label="Top-1")
+    plot_heatmap(metrics, level=3, out_path=figures_dir / "heatmap_top5_level3.png", metric="top5_acc", metric_label="Top-5")
+    plot_rank_heatmap(metrics, level=3, out_path=figures_dir / "heatmap_rank_level3.png", metric="top1_acc", metric_label="Top-1")
+    plot_degradation_curves(metrics, out_path=figures_dir / "degradation_curves.png", metric="top1_acc")
+    plot_degradation_curves(metrics, out_path=figures_dir / "degradation_curves_log.png", metric="top1_acc", log_scale=True)
+    plot_degradation_curves(metrics, out_path=figures_dir / "degradation_curves_top5.png", metric="top5_acc")
+    plot_degradation_curves(metrics, out_path=figures_dir / "degradation_curves_top5_log.png", metric="top5_acc", log_scale=True)
     logger.info(f"Wrote figures -> {figures_dir}")
 
     overall = metrics[metrics["kind"] == "ALL"][["model", "top1_acc", "top5_acc", "mrr"]]
     overall = overall.sort_values("top1_acc", ascending=False)
     logger.info("Overall (all perturbations combined):\n" + overall.to_string(index=False))
+
+    rank_by_kind = rank_table(metrics, level=3, metric="top1_acc")
+    rank_path = run_dir / "rank_by_kind_level3.csv"
+    rank_by_kind.round(1).to_csv(rank_path)
+    logger.info(f"Top-1 rank per kind at level 3 (1=best of {len(rank_by_kind)}), sorted by mean:\n" + rank_by_kind.round(1).to_string())
 
     complete_run(run_dir)
     logger.info("Done.")

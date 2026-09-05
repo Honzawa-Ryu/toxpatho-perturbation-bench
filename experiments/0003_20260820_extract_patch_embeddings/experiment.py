@@ -37,9 +37,9 @@ def setup_logger(run_dir: Path, name: str = "experiment") -> logging.Logger:
     return logger
 
 
-def load_config(exp_dir: Path) -> dict:
-    """Load config.yml from the experiment directory."""
-    config_path = exp_dir / "config.yml"
+def load_config(exp_dir: Path, config_name: str = "config.yml") -> dict:
+    """Load a config file from the experiment directory."""
+    config_path = exp_dir / config_name
     if not config_path.exists():
         return {}
     with open(config_path) as f:
@@ -98,7 +98,7 @@ def main() -> None:
     args = parse_args()
     model_name = args.model
 
-    config = load_config(Path(__file__).parent)
+    config = load_config(Path(__file__).parent, args.config)
     seed: int = config.get("seed", 42)
     source_exp: str = config["source_exp"]
     source_variant: str = config["source_variant"]
