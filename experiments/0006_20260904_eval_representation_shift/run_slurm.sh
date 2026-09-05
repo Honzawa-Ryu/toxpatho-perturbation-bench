@@ -3,19 +3,24 @@
 #SBATCH --partition=large-andre01
 #SBATCH --output=/workspace/andre01/honzawa/02-playground/toxpatho-perturbation-bench/logs/0006_20260904_eval_representation_shift/%j_0006_20260904_eval_representation_shift.out
 #SBATCH --error=/workspace/andre01/honzawa/02-playground/toxpatho-perturbation-bench/logs/0006_20260904_eval_representation_shift/%j_0006_20260904_eval_representation_shift.out
-#SBATCH --signal=B:USR1@108
+#SBATCH --signal=B:USR1@144
 #SBATCH --export=ALL
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=128g
-#SBATCH --time=03:00:00
+#SBATCH --time=04:00:00
 # CPU-only (reads pre-computed embeddings from Exp 0003, no encoder forward
 # pass) -- no --gres=gpu. mem=128g: per model we hold one full variant's
 # (N=500k, D<=4608) embeddings.parquet in memory at a time (same shape Exp
 # 0004 budgeted 96g for), plus the D x D covariance/CKA computation's
-# transient buffers on top. time=03:00:00: 23 models x 2 variants x ~25
-# (kind,level) groups, each a D x D matmul (dominated by D<=4608); budgeted
-# with margin over Exp 0004's proven 02:00:00 for a single-variant pass.
+# transient buffers on top. time=04:00:00 (large-andre01's own ceiling):
+# 23 models x 2 variants x ~25 (kind,level) groups, each a D x D matmul
+# (dominated by D<=4608) -- comfortable margin over Exp 0004's proven
+# 02:00:00 for a single-variant pass. (A 03:00:00 request was rejected by
+# the cluster's job_submit plugin with "x-large-andre01 requires >= 240
+# minutes" even when --partition=large-andre01 was set explicitly --
+# empirically only time_limit >= 240min got past it; the deployed plugin
+# apparently differs from /etc/slurm/job_submit.lua as read from this node.)
 
 # 他の実験のジョブに依存させたい場合、有効化してjob_idを埋める
 # （job_idは outputs/{依存先exp}/latest_job_id.txt を参照。投入のたびに
