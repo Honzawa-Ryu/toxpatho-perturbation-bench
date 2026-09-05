@@ -1,0 +1,18 @@
+# ============================================================
+# Experiment Configuration
+# ============================================================
+# Compares per-model latent representations along two axes, reusing Exp
+# 0003's embeddings.parquet (same schema/discovery convention as Exp 0004):
+#   - perturbation axis: original vs. perturbed, within each of embed_variant_base
+#     and embed_variant_norm separately (per kind/level).
+#   - normalization axis: embed_variant_base vs. embed_variant_norm, on the
+#     unperturbed original patches only (stain normalization's direct effect
+#     on the embedding, isolated from any perturbation).
+# Only models with a completed run under BOTH variants are evaluated.
+# ============================================================
+
+seed: 42
+
+embed_exp: "0003_20260820_extract_patch_embeddings"
+embed_variant_base: "256px_mpp0.5_n1000x20"
+embed_variant_norm: "256px_mpp0.5_n1000x20_orig"
