@@ -428,3 +428,118 @@ pooling、`ctranspath`はSwinベースでCLSトークン自体を持たない設
 - `lib/stain_norm.py`のH/E判定ヒューリスティック（Ruifrok標準ベクトルとの内積）は妥当性を
   厳密に検証していない。torchstainとの数値比較では平均diff 5.7/255程度のズレが残っており、
   主にこのヒューリスティックの違いに起因すると見られる
+
+## 11. Exp 0006: 表現シフト評価（Effective Rank / CKA）で分かったこと（2026-09-04〜09-05）
+
+10章の染色正規化ablationは検索精度（top1_acc）ベースの間接的な傍証だった。Exp 0006では
+`lib/repr_metrics.py`（`participation_ratio`, `linear_cka`, `paired_cosine_sim`）を使い、
+精度を経由せず表現そのものの幾何を直接比較した。分析コードは`notebooks/abcd_summary.py`、
+生成物は`outputs/0006_20260904_eval_representation_shift/256px_mpp0.5_n1000x20/`
+（`abcd_summary.csv`, `figures/`）。
+
+### 11-1. A/B/C/D枠組み
+
+Exp 0006の`base`/`norm`という2 variantを、正規化と摂動の2軸として再整理したもの
+（`notebooks/abcd_summary.py`）:
+
+- A = オリジナルパッチ、B = A + 摂動、C = A + 染色正規化、D = C + 摂動
+
+`base` variant = (A, B)、`norm` variant = (C, D) に厳密に対応するため、再計算は不要で
+既存2つのparquet（`metrics_perturbation_axis.parquet`, `metrics_normalization_axis.parquet`）の
+再ラベル・再集計だけで済んでいる。
+
+### 11-2. 指標の読み方: `cos_sim`と`cka_linear`は別のものを見ている
+
+`paired_cosine_sim`はサンプルごとのペア比較（摂動前後で同一パッチの埋め込みがどれだけ同じ
+向きを向いているか）、`linear_cka`は(N,D)集合全体の共分散構造の一致度（Kornblith 2019）。
+**cos_simは埋め込み全体を支配する共有方向（例えば染色色調のような低ランク成分）に強く
+引っ張られる一方、cka_linearはその共有方向を差し引いた後の分散構造の一致まで見る**ため、
+「cos_simはほぼ不変なのにcka_linearだけ大きく崩れる」モデルは、見た目の頑健性が実は
+共有方向1本に依存している可能性を示唆する。以下の発見はこの乖離を手がかりにしている。
+
+### 11-3. `openmidnight`の表現崩壊（degenerate representation）
+
+`openmidnight`の`orig_eff_rank_ratio`はA/C問わず0.0007〜0.0008（23モデル中最小、次点の
+`uni_v2`0.0042の1/5程度）で、摂動の種類・強度・正規化の有無によらずほぼ変動しない
+（`pert_eff_rank_ratio`が全kind/level/variantで0.0007〜0.0008に張り付く）。つまり表現が
+恒常的にほぼ1方向に潰れている。
+
+それにもかかわらずAB/CDの`cos_sim_mean`はほぼ1.0（0.9999）で「摂動に完全に不変」に見えるが、
+`cka_linear`は正規化後に劇的に崩れる（`AB_cka_linear`0.5367 → `CD_cka_linear`0.0987、
+23モデル中最大の下げ幅・最低値）。kind別ではlevel3で`color_jitter`0.864→0.074、
+`gaussian_noise`0.545→0.023、`jpeg_compression`0.413→0.059まで落ちる
+（`occlusion`0.809→0.714、`rotation`0.782→0.784は相対的に踏みとどまる）。
+
+解釈: 支配的な1方向（cos_simを高止まりさせている正体）が染色色調に紐づいており、
+正規化でそれを取り除くと残りの微小な分散構造がノイズ・色系摂動に対して無防備になる、
+という「表現崩壊」を直接裏付ける。10-5節で`openmidnight`を「一貫して弱い」に分類した
+判断（精度ベース）と独立に、幾何側からも一致する結果が出た。
+
+### 11-4. `hibou_l`は逆パターン: 正規化で摂動後のeffective rankが上昇・収束
+
+`hibou_l`は`AC_cka_linear`が0.3526で23モデル中最低（`AC_cos_sim_mean`は0.7279とopenmidnightほど
+極端ではない）。つまり正規化そのものが表現の分散構造を最も大きく作り変えるモデルである。
+
+ただしopenmidnightと違い、正規化は`hibou_l`の摂動後effective rankを**ほぼ全kindで倍増させ**
+（level3実測: `occlusion`0.0056→0.0132、`rotation`0.0047→0.0101、`stain_jitter`0.0054→0.0133等）、
+かつkind間の`pert_eff_rank_ratio`のばらつき（`B_eff_rank_ratio_range`0.0106 →
+`D_eff_rank_ratio_range`0.0067）はむしろ縮小する。水準が底上げされつつkind間で均質化する、
+という「崩壊」ではなく「表現の再編成」に近いパターン。正規化への頑健性という一つの数字
+だけでは`openmidnight`と`hibou_l`は同じ「弱いグループ」に見えるが、失敗の質が異なる。
+
+### 11-5. 正規化は摂動へのeffective rank不安定性を大半のモデルで増大させる
+
+`D_eff_rank_ratio_range - B_eff_rank_ratio_range`は23モデル中17モデルで正
+（`kaiko-vits8`+0.0125, `lunit-vits8`+0.0104, `conch_v15`+0.0078が上位）。逆に縮小するのは
+`hibou_l`(-0.0039, 11-4節参照)、`conch_v1`(-0.0012)、`virchow2`(-0.0002)の3モデルのみで、
+残り3モデル（`ctranspath`, `openmidnight`, `virchow2-cls`）はほぼ変化なし。
+
+解釈: 10-3節で「WSI色調が検索のショートカットとして機能していた」ことが分かっているが、
+色調という共有の手がかりを取り除くと、多くのモデルではeffective rankが摂動の種類に
+より敏感に（＝どの摂動が来るかで表現の使う次元数が変わりやすく）なる。色調アンカーは
+検索精度をかさ上げするショートカットであると同時に、表現の次元利用を摂動に対して
+安定させる副作用も持っていた可能性がある。
+
+### 11-6. AB→CDでcka_linearがcos_simより大きく崩れる
+
+ほぼ全モデルで、正規化によって`cos_sim_mean`（AB→CD）は数%程度しか下がらないのに対し、
+`cka_linear`（AB→CD）は相対で20〜80%程度崩れる。例:
+`phikon` cos 0.902→0.841(-7%) / cka 0.801→0.455(-43%)、
+`kaiko-vitl14` cos 0.851→0.794(-7%) / cka 0.726→0.399(-45%)、
+`openmidnight` cos 1.000→1.000(±0%) / cka 0.537→0.099(-82%)。
+11-2節の読み方に沿えば、cos_simを支えていた共有方向の相当部分が染色色調由来で、
+正規化後に残る「本物の」構造的頑健性はcka_linearの下げ幅の方が正直に表している。
+
+### 11-7. `stain_jitter`のCKAと`AC_cka_linear`が10-5節の頑健性バケットを独立に再現
+
+`AC_cka_linear`（正規化そのものが引き起こす構造変化、摂動なし）を降順に見ると、
+下位から`hibou_l`0.3526, `openmidnight`0.5063, `conch_v15`0.701, `phikon_v2`0.7356,
+`phikon`0.7477、上位が`lunit-vits8`0.9478, `genbio-pathfm`0.9354。
+`stain_jitter` level3・正規化前(`variant=base`)の`cka_linear`でも同じ傾向で、
+`lunit-vits8`0.955・`genbio-pathfm`0.917が突出して高く、10-5節で「見かけ上の強さに注意」
+とした`gpfm`(0.805)/`phikon`(0.762)/`ctranspath`(0.841)/`virchow2`(0.825)/`virchow2-cls`(0.851)は
+中〜下位に、「一貫して弱い」とした`conch_v15`(0.756)/`hibou_l`(0.764)/`openmidnight`(0.796)も
+下位に収まる。
+
+10-5節のバケット分けは検索精度ベースの偏相関分析（10-3節）から来ていたが、Exp 0006は
+精度を一切使わず表現の共分散構造だけで同じ序列にほぼ再現した。これは10-3節の
+「WSIショートカット」仮説に対する、指標系列の異なる独立の裏付けと言える。
+
+### 11-8. Effective rank自体は頑健性の代理指標にはならない
+
+`A_eff_rank_ratio`（正規化前のベースライン effective rank比）で見ると、10-5節「一貫して強い」
+の`genbio-pathfm`(0.0056)と`lunit-vits8`(0.0404)は23モデル中ほぼ両極端に位置し、
+「バランス型」の`uni_v2`(0.0042)も最小クラス。つまりeffective rankの高低それ自体は
+11-7節のCKAベースの序列や精度ベースの頑健性バケットと相関しない。表現が低次元
+（低effective rank）か高次元かは頑健性と無関係で、11-7節のような「摂動・正規化に対して
+構造がどれだけ保たれるか」を見るCKA系の指標の方が有用な軸だった。
+
+### 11-9. 残タスク・限界
+
+- 11-7節の一致は目視でのランキング比較にとどまる。10-3節同様、`base_overall`（天井効果）を
+  共変量にした偏Spearman相関を`AC_cka_linear`や`stain_jitter`のcka_linearに対しても回せば、
+  「WSIショートカット」仮説をより定量的に検証できる（次の分析候補）。
+- `openmidnight`の表現崩壊が、モデル自体の性質か`trident`側のwrapper/pooling実装の不具合か
+  未切り分け。`trident/patch_encoder_models/load.py`の該当実装を直接確認する必要がある
+  （10-4節で触れた集約方法の違いと合わせて要調査）。
+- gated 6モデル（10-6節）は本分析にも未反映。承認後にExp 0006も再実行が必要。
