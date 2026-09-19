@@ -56,9 +56,11 @@ def main() -> None:
 
     from lib.output_utils import complete_run, get_run_dir, write_run_metadata
     from lib.patch_sampling import (
+        MIN_TISSUE_FRACTION,
         extract_patch,
         pick_level_for_mpp,
         sample_patch_coords,
+        tissue_fraction,
         tissue_mask_from_thumbnail,
     )
 
@@ -128,9 +130,16 @@ def main() -> None:
                 rng=rng,
             )
 
+            n_rejected = 0
             for x, y in coords:
                 pid = f"{wsi_id}_{x}_{y}"
                 img = extract_patch(slide, x, y, level, patch_size_px)
+                # The thumbnail mask is too coarse to be trusted on its own
+                # (see lib.patch_sampling.tissue_fraction); check the crop
+                # that actually gets saved.
+                if tissue_fraction(img) < MIN_TISSUE_FRACTION:
+                    n_rejected += 1
+                    continue
                 img.save(patches_dir / f"{pid}.png")
                 rows.append(
                     {
@@ -145,7 +154,10 @@ def main() -> None:
                 )
 
             slide.close()
-            logger.info(f"[{i + 1}/{len(selected)}] {wsi_id}: {len(coords)} patches (level={level}, mpp={level_mpp:.4f})")
+            logger.info(
+                f"[{i + 1}/{len(selected)}] {wsi_id}: {len(coords) - n_rejected} patches "
+                f"({n_rejected} rejected as background) (level={level}, mpp={level_mpp:.4f})"
+            )
 
         except Exception:
             n_failed_wsi += 1
