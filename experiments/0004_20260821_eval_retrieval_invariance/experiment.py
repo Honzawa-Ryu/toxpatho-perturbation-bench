@@ -11,6 +11,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 import pyarrow.parquet as pq
 import yaml
 
@@ -80,8 +81,8 @@ def discover_completed_models(embed_dir: Path, variant_suffix: str) -> dict[str,
     return models
 
 
-def eval_model(model_dir: Path, query_batch_size: int = 4000) -> pd.DataFrame:
-    """Return a per-perturbation (kind, level) metrics DataFrame for one model.
+def eval_model(model_dir: Path, query_batch_size: int = 4000) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Return (per-(kind, level) metrics, per-query results) for one model.
 
     The (n_query x n_gallery) similarity matrix is computed in query batches
     rather than all at once -- at pilot scale (48k x 2k) a single dense matrix
@@ -113,6 +114,18 @@ def eval_model(model_dir: Path, query_batch_size: int = 4000) -> pd.DataFrame:
         offset += n
     meta = table.select(["parent_patch_id", "source_type", "kind", "level"]).to_pandas()
 
+    # Macenko fails on a handful of background patches, so the normalized
+    # variant is missing rows the raw one has (437 of 480,000 queries, plus 17
+    # of 20,000 gallery patches). Dropping those patches from both variants
+    # keeps the raw-vs-normalized comparison exactly paired instead of
+    # comparing two slightly different query sets and galleries.
+    from lib.patch_sampling import EXCLUDED_PATCH_IDS
+
+    keep = ~meta["parent_patch_id"].isin(EXCLUDED_PATCH_IDS)
+    if not keep.all():
+        embeddings = embeddings[keep.to_numpy()]
+        meta = meta.loc[keep].reset_index(drop=True)
+
     is_orig = (meta["source_type"] == "original").to_numpy()
     gallery_ids = meta.loc[is_orig, "parent_patch_id"].to_numpy()
     gallery_emb = embeddings[is_orig].copy()
@@ -126,6 +139,8 @@ def eval_model(model_dir: Path, query_batch_size: int = 4000) -> pd.DataFrame:
 
     rank = np.empty(len(pert), dtype=np.int64)
     true_sim = np.empty(len(pert), dtype=np.float32)
+    top1_idx = np.empty(len(pert), dtype=np.int64)
+    top1_sim = np.empty(len(pert), dtype=np.float32)
     for start in range(0, len(query_emb), query_batch_size):
         end = start + query_batch_size
         sims = query_emb[start:end] @ gallery_emb.T  # (batch, n_gallery) cosine similarity
@@ -135,6 +150,12 @@ def eval_model(model_dir: Path, query_batch_size: int = 4000) -> pd.DataFrame:
         # are broken optimistically (strict '>' only counts genuinely closer items).
         rank[start:end] = (sims > batch_true_sim[:, None]).sum(axis=1) + 1
         true_sim[start:end] = batch_true_sim
+        # Nearest gallery patch regardless of correctness. argmax breaks ties
+        # by first index, so on a tie top1_idx may point at a patch other than
+        # the parent even when rank == 1.
+        batch_top1 = sims.argmax(axis=1)
+        top1_idx[start:end] = batch_top1
+        top1_sim[start:end] = sims[np.arange(len(sims)), batch_top1]
 
     result = pert[["kind", "level"]].copy()
     result["rank"] = rank
@@ -162,7 +183,22 @@ def eval_model(model_dir: Path, query_batch_size: int = 4000) -> pd.DataFrame:
     overall["level"] = None
     overall_df = pd.DataFrame([overall])[by_kind_level.columns]
 
-    return pd.concat([by_kind_level, overall_df], ignore_index=True)
+    # One row per query, kept so that post-hoc questions -- what did it
+    # retrieve instead, was the wrong hit from the same WSI / compound /
+    # study batch, is the wrong hit a near-duplicate of the parent, does the
+    # ranking hold on lesion-bearing slides -- can be answered by
+    # re-aggregating this table against TG-GATEs metadata, instead of
+    # recomputing 480k x 20k similarities per model. (parent_patch_id, kind,
+    # level) is the query's identity: Exp 0003 names the perturbed row
+    # "{parent}__{kind}__L{level}", so the query id itself is redundant here.
+    per_query = pert[["parent_patch_id", "kind", "level"]].copy()
+    per_query["level"] = per_query["level"].astype("int16")
+    per_query["rank"] = rank.astype(np.int32)
+    per_query["cos_sim"] = true_sim
+    per_query["top1_patch_id"] = gallery_ids[top1_idx]
+    per_query["top1_cos_sim"] = top1_sim
+
+    return pd.concat([by_kind_level, overall_df], ignore_index=True), per_query
 
 
 def plot_heatmap(
@@ -291,12 +327,38 @@ def main() -> None:
     logger.info(f"embed_dir: {embed_dir}")
     logger.info(f"Discovered {len(models)} completed models: {sorted(models)}")
 
+    per_query_path = run_dir / "per_query_ranks.parquet"
+    per_query_schema = pa.schema(
+        [
+            ("model", pa.string()),
+            ("parent_patch_id", pa.string()),
+            ("kind", pa.string()),
+            ("level", pa.int16()),
+            ("rank", pa.int32()),
+            ("cos_sim", pa.float32()),
+            ("top1_patch_id", pa.string()),
+            ("top1_cos_sim", pa.float32()),
+        ]
+    )
+    # One row group per model, written as the loop goes: the whole table is
+    # ~11M rows (23 models x 480k queries) and the loop already peaks near
+    # 37GB on genbio-pathfm's embeddings, so holding every model's rows in
+    # memory until the end would become the largest allocation in the job.
     all_metrics = []
-    for i, (model, dir_name) in enumerate(sorted(models.items())):
-        logger.info(f"[{i + 1}/{len(models)}] evaluating {model}")
-        m = eval_model(embed_dir / dir_name)
-        m.insert(0, "model", model)
-        all_metrics.append(m)
+    per_query_writer = pq.ParquetWriter(per_query_path, per_query_schema)
+    try:
+        for i, (model, dir_name) in enumerate(sorted(models.items())):
+            logger.info(f"[{i + 1}/{len(models)}] evaluating {model}")
+            m, per_query = eval_model(embed_dir / dir_name)
+            m.insert(0, "model", model)
+            all_metrics.append(m)
+            per_query.insert(0, "model", model)
+            per_query_writer.write_table(
+                pa.Table.from_pandas(per_query, schema=per_query_schema, preserve_index=False)
+            )
+    finally:
+        per_query_writer.close()
+    logger.info(f"Wrote per-query ranks -> {per_query_path}")
 
     metrics = pd.concat(all_metrics, ignore_index=True)
     metrics_path = run_dir / "metrics_by_model_perturbation.parquet"

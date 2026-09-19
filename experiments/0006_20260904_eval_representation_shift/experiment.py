@@ -94,6 +94,17 @@ def load_embeddings(model_dir: Path) -> tuple[np.ndarray, pd.DataFrame]:
         embeddings[offset : offset + n] = chunk.values.to_numpy(zero_copy_only=False).reshape(n, dim)
         offset += n
     meta = table.select(["parent_patch_id", "source_type", "kind", "level"]).to_pandas()
+
+    # Same exclusion as Exp 0004: patches Macenko cannot process, dropped from
+    # both variants so the A/B (raw) and C/D (normalized) axes are measured on
+    # one identical patch set.
+    from lib.patch_sampling import EXCLUDED_PATCH_IDS
+
+    keep = ~meta["parent_patch_id"].isin(EXCLUDED_PATCH_IDS)
+    if not keep.all():
+        embeddings = embeddings[keep.to_numpy()]
+        meta = meta.loc[keep].reset_index(drop=True)
+
     return embeddings, meta
 
 
