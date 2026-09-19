@@ -18,6 +18,11 @@ from PIL import Image
 OD_BACKGROUND_THRESHOLD = 0.15  # OD magnitude below this = background, excluded from SVD
 ANGLE_PERCENTILE = 1.0  # robust min/max angle percentile (vs. literal min/max)
 CONCENTRATION_PERCENTILE = 99.0  # robust max-concentration percentile
+MIN_FOREGROUND_PIXELS = 100  # 0.15% of a 256x256 patch; below this the estimate is noise anyway
+
+
+class InsufficientTissueError(ValueError):
+    """An image has too few tissue pixels to estimate stain vectors from."""
 
 
 def _rgb_to_od(img: Image.Image) -> np.ndarray:
@@ -45,6 +50,15 @@ def estimate_stain_matrix(od: np.ndarray) -> np.ndarray:
     """
     od_magnitude = np.linalg.norm(od, axis=1)
     od_fg = od[od_magnitude >= OD_BACKGROUND_THRESHOLD]
+    # Without this, a blank (all-background) patch reaches np.cov with 0 or 1
+    # rows, which yields a NaN covariance, and np.linalg.eigh then fails with
+    # "Eigenvalues did not converge" -- a stack trace that says nothing about
+    # the real problem. See lib.patch_sampling.EXCLUDED_PATCH_IDS.
+    if len(od_fg) < MIN_FOREGROUND_PIXELS:
+        raise InsufficientTissueError(
+            f"only {len(od_fg)} of {len(od)} pixels reach OD {OD_BACKGROUND_THRESHOLD}; "
+            "too little tissue to estimate stain vectors"
+        )
     od_fg_centered = od_fg - od_fg.mean(axis=0, keepdims=True)
     cov = np.cov(od_fg_centered, rowvar=False)
     eigvals, eigvecs = np.linalg.eigh(cov)
