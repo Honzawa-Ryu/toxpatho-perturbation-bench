@@ -55,7 +55,7 @@ PYTHON_PATH="${PROJECT_ROOT}/experiments/${EXP_NAME}/experiment.py"
 # =====================================================
 
 RUN_MODE="array"
-BASE_COMMAND="python ${PYTHON_PATH}"
+BASE_COMMAND="python ${PYTHON_PATH} --config ${CONFIG_NAME:-config.yml}"
 GRID_ARGS=(
     "--model"
 )

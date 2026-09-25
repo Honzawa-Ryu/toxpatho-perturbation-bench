@@ -125,13 +125,20 @@ def main() -> None:
                 mask_scale=mask_scale,
                 level=level,
                 patch_size_px=patch_size_px,
-                n_patches=patches_per_wsi,
+                n_patches=None,
                 tissue_threshold=tissue_threshold,
                 rng=rng,
             )
 
+            # coords holds every mask-accepted candidate in shuffled order, so a
+            # crop rejected below is replaced by the next candidate. Only the
+            # rng.permutation inside sample_patch_coords consumes rng, so other
+            # WSIs' patches do not depend on how many were rejected here.
             n_rejected = 0
+            n_saved = 0
             for x, y in coords:
+                if n_saved >= patches_per_wsi:
+                    break
                 pid = f"{wsi_id}_{x}_{y}"
                 img = extract_patch(slide, x, y, level, patch_size_px)
                 # The thumbnail mask is too coarse to be trusted on its own
@@ -152,10 +159,11 @@ def main() -> None:
                         "patch_size_px": patch_size_px,
                     }
                 )
+                n_saved += 1
 
             slide.close()
             logger.info(
-                f"[{i + 1}/{len(selected)}] {wsi_id}: {len(coords) - n_rejected} patches "
+                f"[{i + 1}/{len(selected)}] {wsi_id}: {n_saved} patches "
                 f"({n_rejected} rejected as background) (level={level}, mpp={level_mpp:.4f})"
             )
 

@@ -99,7 +99,7 @@ def sample_patch_coords(
     mask_scale: float,
     level: int,
     patch_size_px: int,
-    n_patches: int,
+    n_patches: int | None,
     tissue_threshold: float,
     rng: np.random.Generator,
 ) -> list[tuple[int, int]]:
@@ -108,6 +108,8 @@ def sample_patch_coords(
     Candidates are drawn from a non-overlapping grid (spacing = one patch at the
     target level) and accepted if their tissue occupancy in the thumbnail mask
     is >= tissue_threshold. Candidate order is shuffled deterministically via rng.
+    n_patches=None returns every accepted candidate in that order, for callers
+    that apply a further check and need replacements to draw from.
     """
     downsample = slide.level_downsamples[level]
     step_level0 = int(round(patch_size_px * downsample))
@@ -122,7 +124,7 @@ def sample_patch_coords(
     order = rng.permutation(len(candidates))
     accepted: list[tuple[int, int]] = []
     for idx in order:
-        if len(accepted) >= n_patches:
+        if n_patches is not None and len(accepted) >= n_patches:
             break
         x, y = candidates[int(idx)]
         mx0, my0 = int(x / mask_scale), int(y / mask_scale)
