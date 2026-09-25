@@ -59,6 +59,7 @@ dependencies = [
     "timm>=0.9.16,<2",
     "einops-exts",
     "trident[patch-encoders]",
+    "torchstain",  # reference Macenko impl, for validating lib/stain_norm.py against it
 ]
 
 
