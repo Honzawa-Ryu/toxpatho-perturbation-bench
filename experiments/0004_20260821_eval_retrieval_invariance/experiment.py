@@ -114,9 +114,9 @@ def eval_model(model_dir: Path, query_batch_size: int = 4000) -> tuple[pd.DataFr
         offset += n
     meta = table.select(["parent_patch_id", "source_type", "kind", "level"]).to_pandas()
 
-    # Macenko fails on a handful of background patches, so the normalized
-    # variant is missing rows the raw one has (437 of 480,000 queries, plus 17
-    # of 20,000 gallery patches). Dropping those patches from both variants
+    # Macenko fails on a handful of patches, so the normalized variant is
+    # missing rows the raw one has (see lib.patch_sampling.EXCLUDED_PATCH_IDS).
+    # Dropping those patches from both variants
     # keeps the raw-vs-normalized comparison exactly paired instead of
     # comparing two slightly different query sets and galleries.
     from lib.patch_sampling import EXCLUDED_PATCH_IDS
