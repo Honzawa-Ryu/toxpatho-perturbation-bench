@@ -14,7 +14,14 @@ import pyarrow.parquet as pq
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from lib.repr_metrics import linear_cka, paired_cosine_sim, paired_mse, participation_ratio, relative_mse
+from lib.repr_metrics import (
+    centered_paired_cosine_sim,
+    linear_cka,
+    paired_cosine_sim,
+    paired_mse,
+    participation_ratio,
+    relative_mse,
+)
 
 
 def _get_project_root() -> Path:
@@ -132,6 +139,7 @@ def split_orig_pert(
 def _pair_summary(a: np.ndarray, b: np.ndarray) -> dict:
     """cos/mse/cka/effective-rank summary for one matched (a, b) pair of sets."""
     cos = paired_cosine_sim(a, b)
+    cos_c = centered_paired_cosine_sim(a, b)
     mse = paired_mse(a, b)
     a_pr, a_pr_ratio = participation_ratio(a)
     b_pr, b_pr_ratio = participation_ratio(b)
@@ -139,6 +147,8 @@ def _pair_summary(a: np.ndarray, b: np.ndarray) -> dict:
         "n": len(a),
         "cos_sim_mean": float(cos.mean()),
         "cos_sim_std": float(cos.std()),
+        "cos_sim_centered_mean": float(cos_c.mean()),
+        "cos_sim_centered_std": float(cos_c.std()),
         "mse_mean": float(mse.mean()),
         "mse_mean_relative": relative_mse(float(mse.mean()), a),
         "cka_linear": linear_cka(a, b),

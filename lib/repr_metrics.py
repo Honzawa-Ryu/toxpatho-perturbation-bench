@@ -20,6 +20,15 @@ def paired_cosine_sim(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     return (a_n * b_n).sum(axis=1)
 
 
+def centered_paired_cosine_sim(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """`paired_cosine_sim` after removing each set's own mean -- the same
+    centering `linear_cka` applies. The raw version is dominated by the
+    direction every embedding shares, so it stays near 1 whatever the
+    perturbation does (docs section 12-1).
+    """
+    return paired_cosine_sim(a - a.mean(axis=0, keepdims=True), b - b.mean(axis=0, keepdims=True))
+
+
 def paired_mse(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     """Row-wise mean squared error between matched (N, D) embeddings, on the
     raw (un-normalized) embedding scale -- not comparable across models with

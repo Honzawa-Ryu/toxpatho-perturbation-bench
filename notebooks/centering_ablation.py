@@ -34,7 +34,7 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from lib.repr_metrics import linear_cka, paired_cosine_sim  # noqa: E402
+from lib.repr_metrics import centered_paired_cosine_sim, linear_cka, paired_cosine_sim  # noqa: E402
 
 # Exp 0006's directory name starts with a digit, so it cannot be imported by
 # name -- load it by path rather than duplicating its loader/pairing logic.
@@ -48,13 +48,6 @@ EMBED_DIR = PROJECT_ROOT / "outputs/0003_20260820_extract_patch_embeddings"
 OUT_DIR = PROJECT_ROOT / "outputs/0006_20260904_eval_representation_shift/256px_mpp0.5_n1000x20"
 
 VARIANTS = {"base": "256px_mpp0.5_n1000x20", "norm": "256px_mpp0.5_n1000x20_orig"}
-
-
-def centered_paired_cosine_sim(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    """paired_cosine_sim after removing each set's own mean -- the only
-    difference from paired_cosine_sim is the centering linear_cka applies.
-    """
-    return paired_cosine_sim(a - a.mean(axis=0, keepdims=True), b - b.mean(axis=0, keepdims=True))
 
 
 def uncentered_linear_cka(x: np.ndarray, y: np.ndarray) -> float:
