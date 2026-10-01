@@ -6,6 +6,10 @@ acc_drop is the relative change (norm - base) / base, the same ratio as
 notebooks/compare_stainnorm.py's norm_ratio minus one. The partial Spearman
 controls for acc_base, as in section 12-3.
 
+Also correlates base eta2 with each (kind, level)'s top1 relative to the
+model's overall top1, to find which perturbations high-eta2 models are
+relatively weak or strong against.
+
 Not a pipeline experiment -- reads already-completed output.
 Rerun via srun + apptainer:  python notebooks/cluster_eta2_summary.py
 """
@@ -79,6 +83,27 @@ def main() -> None:
         print(f"study_base  vs acc_base: rho={r.statistic:+.3f} p={r.pvalue:.4f}")
 
     print("\n", preds.sort_values("study_base").round(3).to_string())
+
+    # Per perturbation: top1 of each (kind, level) divided by the model's
+    # overall top1, so a model's general strength drops out and what remains
+    # is which perturbations it is relatively weak or strong against.
+    metrics = pd.read_parquet(RETRIEVAL_DIR / "metrics_by_model_perturbation.parquet")
+    per_kind = metrics[metrics["kind"] != "ALL"]
+    rows = []
+    for (kind, level), g in per_kind.groupby(["kind", "level"]):
+        rel = g.set_index("model")["top1_acc"] / acc["acc_base"]
+        for part, col in [("slide", "slide_base"), ("study", "study_base")]:
+            x = preds[col].reindex(rel.index)
+            r = spearmanr(x, rel)
+            keep = rel.index != "openmidnight"
+            r_no = spearmanr(x[keep], rel[keep])
+            rows.append({"eta2": part, "kind": kind, "level": int(level),
+                         "rho": r.statistic, "p": r.pvalue,
+                         "rho_no_openmidnight": r_no.statistic, "p_no_openmidnight": r_no.pvalue})
+    per = pd.DataFrame(rows)
+    per["bonferroni_ok"] = per["p"] < 0.05 / len(per)
+    print(f"\nPer-perturbation relative top1 vs base eta2 ({len(per)} tests):")
+    print(per.round(4).to_string(index=False))
 
 
 if __name__ == "__main__":
